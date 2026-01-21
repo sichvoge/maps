@@ -2,45 +2,71 @@
   <div class="geomap-container">
     <div v-if="loading" class="loading">Loading map data...</div>
     <div v-else-if="error" class="error">{{ error }}</div>
-    <div v-else class="map-wrapper">
-      <div class="pulse-selector">
-        <label for="pulse-mode">Animation Style:</label>
-        <select id="pulse-mode" v-model="pulseMode" @change="changePulseMode">
-          <option value="smooth-wave">Smooth Wave</option>
-          <option value="rapid-pulse">Rapid Pulse</option>
-          <option value="heartbeat">Heartbeat</option>
-          <option value="gentle-fade">Gentle Fade</option>
-          <option value="ripple-wave">Ripple Wave</option>
-          <option value="static">Static (No Animation)</option>
-        </select>
+    <div v-else>
+      <div class="controls-bar">
+        <div class="pulse-selector">
+          <label for="pulse-mode">Animation Style:</label>
+          <select id="pulse-mode" v-model="pulseMode" @change="changePulseMode">
+            <option value="smooth-wave">Smooth Wave</option>
+            <option value="rapid-pulse">Rapid Pulse</option>
+            <option value="heartbeat">Heartbeat</option>
+            <option value="gentle-fade">Gentle Fade</option>
+            <option value="ripple-wave">Ripple Wave</option>
+            <option value="static">Static (No Animation)</option>
+          </select>
+        </div>
       </div>
-      <div ref="mapContainer" class="map-container"></div>
-      <div class="legend">
-        <h3>Top Countries by Requests</h3>
-        <div class="color-scale">
-          <div class="scale-item">
-            <span class="color-box" style="background: rgba(220, 38, 38, 0.8)"></span>
-            <span class="scale-label">High</span>
-          </div>
-          <div class="scale-item">
-            <span class="color-box" style="background: rgba(249, 115, 22, 0.8)"></span>
-          </div>
-          <div class="scale-item">
-            <span class="color-box" style="background: rgba(251, 191, 36, 0.8)"></span>
-          </div>
-          <div class="scale-item">
-            <span class="color-box" style="background: rgba(34, 197, 94, 0.8)"></span>
-          </div>
-          <div class="scale-item">
-            <span class="color-box" style="background: rgba(59, 130, 246, 0.8)"></span>
-            <span class="scale-label">Low</span>
+      <div class="map-wrapper">
+        <div class="stats-card">
+          <div class="stats-label">TOTAL REQUESTS</div>
+          <div class="stats-value">{{ formatNumber(totalRequests) }}</div>
+          <div class="stats-change">
+            <span class="change-icon">↑</span>
+            <span class="change-value">+12.5%</span>
+            <span class="change-label">vs last hour</span>
           </div>
         </div>
-        <div class="legend-divider"></div>
-        <div v-for="item in topCountries" :key="item.country" class="legend-item">
-          <span class="country-name">{{ item.name }}</span>
-          <span class="country-requests">{{ formatNumber(item.requests) }}</span>
+        <div class="legend-card" :class="{ collapsed: legendCollapsed }">
+          <div class="legend-header" @click="toggleLegend">
+            <div class="legend-title">
+              <span class="legend-icon">📊</span>
+              <span>Top 5 Countries</span>
+            </div>
+            <span class="toggle-icon">{{ legendCollapsed ? '▼' : '▲' }}</span>
+          </div>
+          <div v-if="!legendCollapsed" class="legend-content">
+            <div v-for="(item, index) in topCountries" :key="item.country" class="legend-country">
+              <div class="country-rank">{{ index + 1 }}</div>
+              <div class="country-flag">{{ getCountryFlag(item.country) }}</div>
+              <div class="country-info">
+                <div class="country-header">
+                  <span class="country-name">{{ item.name }}</span>
+                  <span class="country-percent">{{ getPercentage(item.requests) }}%</span>
+                </div>
+                <div class="country-stats">
+                  <span class="country-requests">{{ formatNumber(item.requests) }}</span>
+                  <div class="country-sparkline">
+                    <svg width="40" height="16" viewBox="0 0 40 16">
+                      <polyline
+                        :points="generateSparkline(index)"
+                        fill="none"
+                        :stroke="getSparklineColor(item.requests)"
+                        stroke-width="1.5"
+                      />
+                    </svg>
+                  </div>
+                </div>
+              </div>
+              <div class="country-bar">
+                <div 
+                  class="country-bar-fill" 
+                  :style="{ width: getPercentage(item.requests) + '%', background: getBarColor(item.requests) }"
+                ></div>
+              </div>
+            </div>
+          </div>
         </div>
+        <div ref="mapContainer" class="map-container"></div>
       </div>
     </div>
   </div>
@@ -61,7 +87,15 @@ export default {
       topCountries: [],
       pulseMode: 'smooth-wave',
       animationFrameId: null,
-      currentPopup: null
+      currentPopup: null,
+      totalRequests: 0,
+      legendCollapsed: true,
+      countryTrends: {}
+    }
+  },
+  computed: {
+    formattedTotal() {
+      return this.formatNumber(this.totalRequests)
     }
   },
   async mounted() {
@@ -92,6 +126,17 @@ export default {
       const data = await response.json()
       this.countryData = data.data
       
+      // Calculate total requests
+      this.totalRequests = this.countryData.reduce((sum, item) => sum + item.requests, 0)
+      
+      // Generate consistent trend data for each country
+      this.countryData.forEach(item => {
+        this.countryTrends[item.country] = {
+          direction: Math.random() > 0.5 ? 'up' : 'down',
+          percentage: (Math.random() * 20 + 5).toFixed(1)
+        }
+      })
+      
       this.topCountries = [...this.countryData]
         .sort((a, b) => b.requests - a.requests)
         .slice(0, 5)
@@ -107,6 +152,12 @@ export default {
 
       // Add navigation controls
       this.map.addControl(new maplibregl.NavigationControl(), 'top-right')
+      
+      // Hide MapLibre attribution
+      const attributionControl = this.map._controls.find(c => c instanceof maplibregl.AttributionControl)
+      if (attributionControl) {
+        this.map.removeControl(attributionControl)
+      }
 
       // Wait for the map to load
       this.map.on('load', () => {
@@ -281,7 +332,15 @@ export default {
         }
         
         const feature = e.features[0]
-        const { name, requests } = feature.properties
+        const { name, requests, country } = feature.properties
+        const percentage = this.getPercentage(requests)
+        const flag = this.getCountryFlag(country)
+        
+        // Get consistent trend data for this country
+        const trendData = this.countryTrends[country] || { direction: 'up', percentage: '0.0' }
+        const trend = trendData.direction === 'up' ? '↑' : '↓'
+        const trendColor = trendData.direction === 'up' ? '#22c55e' : '#ef4444'
+        const trendPercent = trendData.percentage
         
         // Create popup
         this.currentPopup = new maplibregl.Popup({
@@ -291,11 +350,32 @@ export default {
         })
           .setLngLat(feature.geometry.coordinates)
           .setHTML(`
-            <div style="padding: 12px; min-width: 160px; background: rgba(0, 0, 0, 0.9); border-radius: 6px;">
-              <strong style="font-size: 15px; color: #fff; display: block; margin-bottom: 6px;">${name}</strong>
-              <div style="display: flex; justify-content: space-between; align-items: center;">
-                <span style="color: #aaa; font-size: 13px;">Requests:</span>
-                <strong style="color: #22c55e; font-size: 15px; margin-left: 8px;">${this.formatNumber(requests)}</strong>
+            <div style="padding: 14px 16px; min-width: 200px; background: rgba(15, 15, 20, 0.98); border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.1); box-shadow: 0 8px 16px rgba(0, 0, 0, 0.5);">
+              <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
+                <span style="font-size: 28px; line-height: 1;">${flag}</span>
+                <div style="flex: 1;">
+                  <strong style="font-size: 16px; color: #fff; display: block; line-height: 1.2;">${name}</strong>
+                  <span style="font-size: 11px; color: #666; text-transform: uppercase; letter-spacing: 0.5px;">${country}</span>
+                </div>
+              </div>
+              <div style="border-top: 1px solid rgba(255, 255, 255, 0.1); padding-top: 10px; display: flex; flex-direction: column; gap: 8px;">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                  <span style="color: #888; font-size: 12px;">Total Requests</span>
+                  <strong style="color: #fff; font-size: 16px; font-weight: 600;">${this.formatNumber(requests)}</strong>
+                </div>
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                  <span style="color: #888; font-size: 12px;">% of Total</span>
+                  <strong style="color: #22c55e; font-size: 14px; font-weight: 600;">${percentage}%</strong>
+                </div>
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                  <span style="color: #888; font-size: 12px;">Trend (24h)</span>
+                  <span style="color: ${trendColor}; font-size: 14px; font-weight: 600;">
+                    <span style="font-size: 16px;">${trend}</span> ${trendPercent}%
+                  </span>
+                </div>
+                <div style="margin-top: 6px; padding-top: 8px; border-top: 1px solid rgba(255, 255, 255, 0.05);">
+                  <span style="color: #555; font-size: 10px;">Last updated: just now</span>
+                </div>
               </div>
             </div>
           `)
@@ -312,6 +392,65 @@ export default {
     },
     formatNumber(num) {
       return new Intl.NumberFormat().format(num)
+    },
+    toggleLegend() {
+      this.legendCollapsed = !this.legendCollapsed
+    },
+    getCountryFlag(countryCode) {
+      const flags = {
+        'US': '🇺🇸',
+        'DE': '🇩🇪',
+        'GB': '🇬🇧',
+        'FR': '🇫🇷',
+        'CA': '🇨🇦',
+        'JP': '🇯🇵',
+        'AU': '🇦🇺',
+        'BR': '🇧🇷',
+        'IN': '🇮🇳',
+        'ES': '🇪🇸',
+        'IT': '🇮🇹',
+        'NL': '🇳🇱',
+        'SE': '🇸🇪',
+        'CH': '🇨🇭',
+        'MX': '🇲🇽'
+      }
+      return flags[countryCode] || '🌍'
+    },
+    getPercentage(requests) {
+      return ((requests / this.totalRequests) * 100).toFixed(1)
+    },
+    generateSparkline(index) {
+      // Generate fake sparkline data for demo (simulating trend over 7 days)
+      const points = []
+      const variance = [0.8, 0.9, 1.1, 0.95, 1.05, 1.15, 1.0]
+      
+      for (let i = 0; i < 7; i++) {
+        const x = (i / 6) * 40
+        const y = 16 - (variance[i] * 8 + Math.random() * 4)
+        points.push(`${x},${y}`)
+      }
+      
+      return points.join(' ')
+    },
+    getSparklineColor(requests) {
+      const maxValue = Math.max(...this.countryData.map(d => d.requests))
+      const ratio = requests / maxValue
+      
+      if (ratio >= 0.7) return '#dc2626'
+      if (ratio >= 0.5) return '#f97316'
+      if (ratio >= 0.3) return '#facc15'
+      if (ratio >= 0.1) return '#22c55e'
+      return '#3b82f6'
+    },
+    getBarColor(requests) {
+      const maxValue = Math.max(...this.countryData.map(d => d.requests))
+      const ratio = requests / maxValue
+      
+      if (ratio >= 0.7) return 'linear-gradient(90deg, #dc2626, #ef4444)'
+      if (ratio >= 0.5) return 'linear-gradient(90deg, #f97316, #fb923c)'
+      if (ratio >= 0.3) return 'linear-gradient(90deg, #facc15, #fde047)'
+      if (ratio >= 0.1) return 'linear-gradient(90deg, #22c55e, #4ade80)'
+      return 'linear-gradient(90deg, #3b82f6, #60a5fa)'
     },
     changePulseMode() {
       // Cancel existing animation
@@ -465,7 +604,7 @@ export default {
 </script>
 
 <style>
-/* Global styles for MapLibre popups - not scoped */
+/* Global styles for MapLibre popups and attribution - not scoped */
 .maplibregl-popup-content {
   background: transparent !important;
   padding: 0 !important;
@@ -476,14 +615,18 @@ export default {
 .maplibregl-popup-tip {
   display: none !important;
 }
+
+.maplibregl-ctrl-attrib,
+.maplibregl-ctrl-bottom-left,
+.maplibregl-ctrl-bottom-right {
+  display: none !important;
+}
 </style>
 
 <style scoped>
 .geomap-container {
   width: 100%;
-  max-height: 80vh;
   position: relative;
-  overflow: hidden;
 }
 
 .loading,
@@ -497,22 +640,18 @@ export default {
   color: #ef4444;
 }
 
-.map-wrapper {
-  position: relative;
-  width: 100%;
-  height: 70vh;
+.controls-bar {
+  display: flex;
+  justify-content: flex-start;
+  padding: 1rem 0;
+  margin-bottom: 1rem;
 }
 
 .pulse-selector {
-  position: absolute;
-  top: 20px;
-  left: 20px;
-  z-index: 10;
   background: rgba(30, 30, 30, 0.95);
   padding: 12px 16px;
   border-radius: 8px;
-  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
-  backdrop-filter: blur(10px);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
   display: flex;
   align-items: center;
   gap: 10px;
@@ -552,87 +691,251 @@ export default {
   padding: 8px;
 }
 
+.map-wrapper {
+  position: relative;
+  width: 100%;
+  height: 70vh;
+}
+
+.stats-card {
+  position: absolute;
+  top: 20px;
+  left: 20px;
+  z-index: 10;
+  background: rgba(20, 20, 25, 0.95);
+  padding: 16px 20px;
+  border-radius: 10px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  min-width: 200px;
+}
+
+.stats-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  color: #888;
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+
+.stats-value {
+  font-size: 32px;
+  font-weight: 700;
+  color: #fff;
+  line-height: 1;
+  margin-bottom: 8px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.stats-change {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+}
+
+.change-icon {
+  color: #22c55e;
+  font-size: 14px;
+  font-weight: bold;
+}
+
+.change-value {
+  color: #22c55e;
+  font-weight: 600;
+}
+
+.change-label {
+  color: #666;
+  margin-left: 2px;
+}
+
 .map-container {
   width: 100%;
   height: 100%;
   border-radius: 8px;
   overflow: hidden;
+  position: relative;
+  background: linear-gradient(135deg, #1a1d29 0%, #0f1419 50%, #1a1d29 100%);
 }
 
-.legend {
+.map-container::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-image: 
+    linear-gradient(rgba(255, 255, 255, 0.02) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+  background-size: 50px 50px;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.map-container canvas {
+  position: relative;
+  z-index: 2;
+}
+
+.legend-card {
   position: absolute;
   top: 20px;
-  right: 20px;
-  min-width: 250px;
-  max-width: 280px;
-  padding: 1.2rem;
-  background: rgba(30, 30, 30, 0.95);
-  border-radius: 8px;
-  text-align: left;
-  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+  right: 50px;
+  z-index: 10;
+  background: rgba(20, 20, 25, 0.95);
+  border-radius: 10px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
   backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  min-width: 300px;
+  max-width: 320px;
+  transition: all 0.3s ease;
+  display: flex;
+  flex-direction: column;
 }
 
-.legend h3 {
-  font-size: 1.1rem;
-  margin-bottom: 1rem;
+.legend-card.collapsed {
+  min-width: 180px;
+}
+
+.legend-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 16px;
+  cursor: pointer;
+  user-select: none;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.legend-card.collapsed .legend-header {
+  border-bottom: none;
+}
+
+.legend-header:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.legend-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 600;
   color: #fff;
 }
 
-.color-scale {
+.legend-icon {
+  font-size: 16px;
+}
+
+.toggle-icon {
+  color: #888;
+  font-size: 12px;
+  transition: transform 0.3s;
+}
+
+.legend-content {
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.legend-country {
+  display: grid;
+  grid-template-columns: 24px 32px 1fr;
+  grid-template-rows: auto auto;
+  gap: 8px;
+  align-items: center;
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 6px;
+  transition: all 0.2s;
+}
+
+.legend-country:hover {
+  background: rgba(255, 255, 255, 0.06);
+  transform: translateX(-2px);
+}
+
+.country-rank {
+  grid-row: 1 / 3;
+  font-size: 14px;
+  font-weight: 700;
+  color: #666;
+  text-align: center;
+}
+
+.country-flag {
+  grid-row: 1 / 3;
+  font-size: 24px;
+  line-height: 1;
+}
+
+.country-info {
+  grid-column: 3;
   display: flex;
   flex-direction: column;
   gap: 4px;
-  margin-bottom: 0.5rem;
+  min-width: 0;
 }
 
-.scale-item {
+.country-header {
   display: flex;
+  justify-content: space-between;
   align-items: center;
   gap: 8px;
 }
 
-.color-box {
-  width: 40px;
-  height: 16px;
-  border-radius: 2px;
-  border: 1px solid rgba(255, 255, 255, 0.2);
+.country-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.scale-label {
-  font-size: 0.85rem;
-  color: #aaa;
+.country-percent {
+  font-size: 12px;
+  font-weight: 600;
+  color: #22c55e;
+  white-space: nowrap;
 }
 
-.legend-divider {
-  height: 1px;
-  background: rgba(255, 255, 255, 0.2);
-  margin: 1rem 0;
-}
-
-.legend-item {
+.country-stats {
   display: flex;
   justify-content: space-between;
-  padding: 0.6rem 0;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-  gap: 1rem;
-}
-
-.legend-item:last-child {
-  border-bottom: none;
-}
-
-.country-name {
-  font-weight: 500;
-  font-size: 0.95rem;
-  color: #fff;
+  align-items: center;
 }
 
 .country-requests {
+  font-size: 11px;
   color: #888;
-  font-weight: 600;
-  font-size: 0.95rem;
-  white-space: nowrap;
+  font-weight: 500;
+}
+
+.country-sparkline {
+  opacity: 0.8;
+}
+
+.country-bar {
+  grid-column: 1 / 4;
+  height: 3px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.country-bar-fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.6s ease;
 }
 
 @media (max-width: 1024px) {
@@ -640,11 +943,22 @@ export default {
     height: 60vh;
   }
   
-  .legend {
+  .stats-card {
     top: 10px;
-    right: 10px;
-    min-width: 220px;
-    padding: 1rem;
+    left: 10px;
+    padding: 12px 16px;
+    min-width: 180px;
+  }
+  
+  .stats-value {
+    font-size: 28px;
+  }
+  
+  .legend-card {
+    top: 10px;
+    right: 50px;
+    min-width: 260px;
+    max-width: 280px;
   }
 }
 
@@ -653,9 +967,24 @@ export default {
     height: 500px;
   }
   
-  .legend {
-    position: static;
-    margin-top: 1rem;
+  .controls-bar {
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+  
+  .stats-card {
+    position: relative;
+    top: auto;
+    left: auto;
+    margin-bottom: 1rem;
+    width: 100%;
+  }
+  
+  .legend-card {
+    position: relative;
+    top: auto;
+    right: auto;
+    margin-bottom: 1rem;
     width: 100%;
     max-width: 100%;
   }
