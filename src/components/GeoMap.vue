@@ -67,6 +67,69 @@
           </div>
         </div>
         <div ref="mapContainer" class="map-container"></div>
+        
+        <transition name="slide">
+          <div v-if="showDetailPanel && selectedCountry" class="detail-panel">
+            <div class="detail-header">
+              <div class="detail-title">
+                <span class="detail-flag">{{ getCountryFlag(selectedCountry.country) }}</span>
+                <div>
+                  <h3>{{ selectedCountry.name }}</h3>
+                  <span class="detail-code">{{ selectedCountry.country }}</span>
+                </div>
+              </div>
+              <button class="close-btn" @click="closeDetailPanel">✕</button>
+            </div>
+            
+            <div class="detail-content">
+              <div class="detail-stat-card">
+                <div class="stat-label">Total Requests</div>
+                <div class="stat-value">{{ formatNumber(selectedCountry.requests) }}</div>
+                <div class="stat-trend" :style="{ color: countryTrends[selectedCountry.country]?.direction === 'up' ? '#22c55e' : '#ef4444' }">
+                  {{ countryTrends[selectedCountry.country]?.direction === 'up' ? '↑' : '↓' }}
+                  {{ countryTrends[selectedCountry.country]?.percentage }}% vs yesterday
+                </div>
+              </div>
+              
+              <div class="detail-stat-card">
+                <div class="stat-label">% of Total Traffic</div>
+                <div class="stat-value">{{ getPercentage(selectedCountry.requests) }}%</div>
+                <div class="progress-bar-full">
+                  <div class="progress-fill" :style="{ width: getPercentage(selectedCountry.requests) + '%' }"></div>
+                </div>
+              </div>
+              
+              <div class="detail-stat-card">
+                <div class="stat-label">Rank</div>
+                <div class="stat-value">#{{ getCountryRank(selectedCountry.country) }}</div>
+                <div class="stat-info">out of {{ countryData.length }} countries</div>
+              </div>
+              
+              <div class="chart-section">
+                <h4>Request History (7 days)</h4>
+                <svg class="request-chart" viewBox="0 0 280 70" preserveAspectRatio="none">
+                  <defs>
+                    <linearGradient id="chartGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+                      <stop offset="0%" style="stop-color:#3b82f6;stop-opacity:0.3" />
+                      <stop offset="100%" style="stop-color:#3b82f6;stop-opacity:0" />
+                    </linearGradient>
+                  </defs>
+                  <path :d="generateChartPath(selectedCountry.country)" fill="url(#chartGradient)" />
+                  <polyline :points="generateChartLine(selectedCountry.country)" fill="none" stroke="#3b82f6" stroke-width="2" />
+                </svg>
+              </div>
+              
+              <div class="detail-actions">
+                <button class="action-btn primary" @click="zoomToCountry(selectedCountry)">
+                  🔍 Zoom to Country
+                </button>
+                <button class="action-btn" @click="resetZoom">
+                  🌍 Reset View
+                </button>
+              </div>
+            </div>
+          </div>
+        </transition>
       </div>
     </div>
   </div>
@@ -90,7 +153,9 @@ export default {
       currentPopup: null,
       totalRequests: 0,
       legendCollapsed: true,
-      countryTrends: {}
+      countryTrends: {},
+      selectedCountry: null,
+      showDetailPanel: false
     }
   },
   computed: {
@@ -389,6 +454,18 @@ export default {
           this.currentPopup = null
         }
       })
+
+      // Add click handler for bubbles
+      this.map.on('click', 'country-bubbles', (e) => {
+        const feature = e.features[0]
+        const { name, requests, country } = feature.properties
+        
+        this.selectedCountry = { name, requests, country }
+        this.showDetailPanel = true
+        
+        // Optional: zoom to country on click
+        this.zoomToCountry({ name, requests, country })
+      })
     },
     formatNumber(num) {
       return new Intl.NumberFormat().format(num)
@@ -451,6 +528,70 @@ export default {
       if (ratio >= 0.3) return 'linear-gradient(90deg, #facc15, #fde047)'
       if (ratio >= 0.1) return 'linear-gradient(90deg, #22c55e, #4ade80)'
       return 'linear-gradient(90deg, #3b82f6, #60a5fa)'
+    },
+    closeDetailPanel() {
+      this.showDetailPanel = false
+      this.selectedCountry = null
+    },
+    getCountryRank(countryCode) {
+      const sorted = [...this.countryData].sort((a, b) => b.requests - a.requests)
+      return sorted.findIndex(c => c.country === countryCode) + 1
+    },
+    zoomToCountry(country) {
+      const countryCoordinates = {
+        'US': [-95.7129, 37.0902],
+        'DE': [10.4515, 51.1657],
+        'GB': [-3.4360, 55.3781],
+        'FR': [2.2137, 46.2276],
+        'CA': [-106.3468, 56.1304],
+        'JP': [138.2529, 36.2048],
+        'AU': [133.7751, -25.2744],
+        'BR': [-51.9253, -14.2350],
+        'IN': [78.9629, 20.5937],
+        'ES': [-3.7492, 40.4637],
+        'IT': [12.5674, 41.8719],
+        'NL': [5.2913, 52.1326],
+        'SE': [18.6435, 60.1282],
+        'CH': [8.2275, 46.8182],
+        'MX': [-102.5528, 23.6345]
+      }
+      
+      const coords = countryCoordinates[country.country]
+      if (coords && this.map) {
+        this.map.flyTo({
+          center: coords,
+          zoom: 4.5,
+          duration: 2000
+        })
+      }
+    },
+    resetZoom() {
+      if (this.map) {
+        this.map.flyTo({
+          center: [15, 30],
+          zoom: 1.8,
+          duration: 2000
+        })
+      }
+      this.closeDetailPanel()
+    },
+    generateChartLine(countryCode) {
+      // Generate fake 7-day data
+      const points = []
+      const baseValue = this.countryData.find(c => c.country === countryCode)?.requests || 1000
+      
+      for (let i = 0; i < 7; i++) {
+        const x = (i / 6) * 280
+        const variance = 0.8 + Math.random() * 0.4
+        const y = 70 - ((baseValue * variance) / (baseValue * 1.2)) * 56
+        points.push(`${x},${y}`)
+      }
+      
+      return points.join(' ')
+    },
+    generateChartPath(countryCode) {
+      const line = this.generateChartLine(countryCode)
+      return `M 0,70 L ${line} L 280,70 Z`
     },
     changePulseMode() {
       // Cancel existing animation
@@ -936,6 +1077,199 @@ export default {
   height: 100%;
   border-radius: 2px;
   transition: width 0.6s ease;
+}
+
+/* Detail Panel Styles */
+.detail-panel {
+  position: absolute;
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 100;
+  background: rgba(15, 15, 20, 0.98);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(20px);
+  width: 90%;
+  max-width: 450px;
+  max-height: calc(100vh - 180px);
+  overflow-y: auto;
+}
+
+.detail-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.detail-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.detail-flag {
+  font-size: 40px;
+  line-height: 1;
+}
+
+.detail-title h3 {
+  font-size: 18px;
+  margin: 0;
+  color: #fff;
+  line-height: 1.2;
+}
+
+.detail-code {
+  font-size: 12px;
+  color: #666;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.close-btn {
+  background: rgba(255, 255, 255, 0.1);
+  border: none;
+  color: #fff;
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+}
+
+.close-btn:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.detail-content {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.detail-stat-card {
+  background: rgba(255, 255, 255, 0.03);
+  padding: 12px 14px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.stat-label {
+  font-size: 12px;
+  color: #888;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 8px;
+}
+
+.stat-value {
+  font-size: 28px;
+  font-weight: 700;
+  color: #fff;
+  line-height: 1;
+  margin-bottom: 6px;
+}
+
+.stat-trend {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.stat-info {
+  font-size: 13px;
+  color: #666;
+  margin-top: 4px;
+}
+
+.progress-bar-full {
+  height: 6px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 3px;
+  overflow: hidden;
+  margin-top: 8px;
+}
+
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #3b82f6, #22c55e);
+  border-radius: 3px;
+  transition: width 0.8s ease;
+}
+
+.chart-section {
+  background: rgba(255, 255, 255, 0.03);
+  padding: 12px 14px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.chart-section h4 {
+  font-size: 13px;
+  color: #fff;
+  margin: 0 0 8px 0;
+  font-weight: 500;
+}
+
+.request-chart {
+  width: 100%;
+  height: 70px;
+}
+
+.detail-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.action-btn {
+  flex: 1;
+  padding: 10px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.05);
+  color: #fff;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  transition: all 0.2s;
+}
+
+.action-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+.action-btn.primary {
+  background: #3b82f6;
+  border-color: #3b82f6;
+}
+
+.action-btn.primary:hover {
+  background: #2563eb;
+}
+
+/* Slide transition */
+.slide-enter-active, .slide-leave-active {
+  transition: all 0.3s ease;
+}
+
+.slide-enter-from {
+  opacity: 0;
+  transform: translateX(-50%) translateY(-20px);
+}
+
+.slide-leave-to {
+  opacity: 0;
+  transform: translateX(-50%) translateY(-20px);
 }
 
 @media (max-width: 1024px) {
